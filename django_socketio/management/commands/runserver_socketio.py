@@ -69,4 +69,13 @@ class Command(BaseCommand):
         Returns the django.contrib.staticfiles handler.
         """
         handler = WSGIHandler()
+        try:
+            from django.contrib.staticfiles.handlers import StaticFilesHandler
+        except ImportError:
+            return handler
+        use_static_handler = options.get('use_static_handler', True)
+        insecure_serving = options.get('insecure_serving', False)
+        if (settings.DEBUG and use_static_handler or
+                (use_static_handler and insecure_serving)):
+            handler = StaticFilesHandler(handler)
         return handler
