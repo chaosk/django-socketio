@@ -1,85 +1,52 @@
+from django.utils.importlib import import_module
+from socketio.mixins import BroadcastMixin
+from socketio.namespace import BaseNamespace
 
-import re
+
+__all__ = ['autodiscover_socketios', 'BaseNamespace', 'Namespace',
+           'BroadcastMixin']
+SOCKETIO_NS = {}
 
 
-class EventError(Exception):
-    pass
+LOADING_SOCKETIO = False
 
-class Event(object):
+
+def autodiscover_socketios():
     """
-    Signal-like object for Socket.IO events that supports
-    filtering on channels. Registering event handlers is
-    performed by using the Event instance as a decorator::
-
-        @on_message
-        def message(request, socket, message):
-            ...
-
-    Event handlers can also be registered for particular
-    channels using the channel keyword argument with a
-    regular expression pattern::
-
-        @on_message(channel="^room-")
-        def message(request, socket, message):
-            ...
-
-    The ``on_connect`` event cannot be registered with a
-    channel pattern since channel subscription occurs
-    after a connection is established.
+    Auto-discover INSTALLED_APPS sockets.py modules and fail silently when
+    not present. NOTE: socketio_autodiscover was inspired/copied from
+    django.contrib.admin autodiscover
     """
+    global LOADING_SOCKETIO
+    if LOADING_SOCKETIO:
+        return
+    LOADING_SOCKETIO = True
 
-    def __init__(self, supports_channels=True):
-        self.supports_channels = supports_channels
-        self.handlers = []
+    import imp
+    from django.conf import settings
 
-    def __call__(self, handler=None, channel=None):
-        """
-        Decorates the given handler. The event may be called
-        with only a channel argument, in which case return a
-        decorator with the channel argument bound.
-        """
-        if handler is None:
-            def handler_with_channel(handler):
-                return self.__call__(handler, channel)
-            return handler_with_channel
-        if channel:
-            if not self.supports_channels:
-                raise EventError("The %s event does not support channels so "
-                                 "the handler `%s` could not be registered" %
-                                 self.name, handler.__name__)
-            channel = re.compile(channel)
-        self.handlers.append((handler, channel))
+    for app in settings.INSTALLED_APPS:
 
-    def send(self, request, socket, context, *args):
-        """
-        When an event is sent, run all relevant handlers. Relevant
-        handlers are those without a channel pattern when the given
-        socket is not subscribed to any particular channel, or the
-        handlers with a channel pattern that matches any of the
-        channels that the given socket is subscribed to.
+        try:
+            app_path = import_module(app).__path__
+        except AttributeError:
+            continue
 
-        In the case of subscribe/unsubscribe, match the channel arg
-        being sent to the channel pattern.
-        """
-        for handler, pattern in self.handlers:
-            no_channel = not pattern and not socket.channels
-            if self.name.endswith("subscribe") and pattern:
-                matches = [pattern.match(args[0])]
-            else:
-                matches = [pattern.match(c) for c in socket.channels if pattern]
-            if no_channel or filter(None, matches):
-                handler(request, socket, context, *args)
+        try:
+            imp.find_module('events', app_path)
+        except ImportError:
+            continue
+
+        import_module("%s.events" % app)
+
+    LOADING_SOCKETIO = False
 
 
-on_connect      = Event(False)  # request, socket, context
-on_message      = Event()       # request, socket, context, message
-on_subscribe    = Event()       # request, socket, context, channel
-on_unsubscribe  = Event()       # request, socket, context, channel
-on_error        = Event()       # request, socket, context, exception
-on_disconnect   = Event()       # request, socket, context
-on_finish       = Event()       # request, socket, context
+class Namespace(object):
+    def __init__(self, name=''):
+        self.name = name
 
-# Give each event a name attribute.
-for k, v in globals().items():
-    if isinstance(v, Event):
-        setattr(v, "name", k)
+    def __call__(self, handler):
+        SOCKETIO_NS[self.name] = handler
+        return handler
+

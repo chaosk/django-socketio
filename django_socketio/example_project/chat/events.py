@@ -1,52 +1,33 @@
+import logging
+from socketio.namespace import BaseNamespace
+from django_socketio.events import Namespace
 
-from django.shortcuts import get_object_or_404
-from django.utils.html import strip_tags
-from django_socketio import events
+@Namespace('/echo')
+class EchoNamespace(BaseNamespace):
+    nicknames = []
 
-from chat.models import ChatRoom
+    def initialize(self):
+        self.logger = logging.getLogger("socketio.chat")
+        self.log("Socketio session started")
+        
+    def log(self, message):
+        self.logger.info("[{0}] {1}".format(self.socket.sessid, message))
+    
+    def on_echo(self, echo):
+        self.emit('echo', echo)
 
+    def recv_disconnect(self):
+        # Remove nickname from the list.
+        self.log('Disconnected')
+        nickname = self.socket.session['nickname']
+        self.nicknames.remove(nickname)
+        self.broadcast_event('announcement', '%s has disconnected' % nickname)
+        self.broadcast_event('nicknames', self.nicknames)
+        self.disconnect(silent=True)
+        return True
 
-@events.on_message(channel="^room-")
-def message(request, socket, context, message):
-    """
-    Event handler for a room receiving a message. First validates a
-    joining user's name and sends them the list of users.
-    """
-    room = get_object_or_404(ChatRoom, id=message["room"])
-    if message["action"] == "start":
-        name = strip_tags(message["name"])
-        user, created = room.users.get_or_create(name=name)
-        if not created:
-            socket.send({"action": "in-use"})
-        else:
-            context["user"] = user
-            users = [u.name for u in room.users.exclude(id=user.id)]
-            socket.send({"action": "started", "users": users})
-            user.session = socket.session.session_id
-            user.save()
-            joined = {"action": "join", "name": user.name, "id": user.id}
-            socket.send_and_broadcast_channel(joined)
-    else:
-        try:
-            user = context["user"]
-        except KeyError:
-            return
-        if message["action"] == "message":
-            message["message"] = strip_tags(message["message"])
-            message["name"] = user.name
-            socket.send_and_broadcast_channel(message)
-
-
-@events.on_finish(channel="^room-")
-def finish(request, socket, context):
-    """
-    Event handler for a socket session ending in a room. Broadcast
-    the user leaving and delete them from the DB.
-    """
-    try:
-        user = context["user"]
-    except KeyError:
-        return
-    left = {"action": "leave", "name": user.name, "id": user.id}
-    socket.broadcast_channel(left)
-    user.delete()
+    def on_user_message(self, msg):
+        self.log('User message: {0}'.format(msg))
+        self.emit_to_room(self.room, 'msg_to_room',
+            self.socket.session['nickname'], msg)
+        return True
