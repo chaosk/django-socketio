@@ -4,28 +4,39 @@ from thread import start_new_thread
 from time import sleep
 from os import getpid, kill, environ
 from signal import SIGINT
+from optparse import make_option
+
+from socketio.server import SocketIOServer
 
 from django.conf import settings
 from django.core.handlers.wsgi import WSGIHandler
 from django.core.management.base import BaseCommand, CommandError
 from django.core.management.commands.runserver import naiveip_re
 from django.utils.autoreload import code_changed, restart_with_reloader
-from socketio.server import SocketIOServer
-
 from django_socketio.settings import HOST, PORT
 
 
-RELOAD = False
+NEEDS_RELOAD = False
 
 def reload_watcher():
-    global RELOAD
+    """
+    Watches for code changes and populates ``NEEDS_RELOAD`` accordingly.
+    """
+    global NEEDS_RELOAD
     while True:
-        RELOAD = code_changed()
-        if RELOAD:
+        NEEDS_RELOAD = code_changed()
+        if NEEDS_RELOAD:
             kill(getpid(), SIGINT)
         sleep(1)
 
 class Command(BaseCommand):
+
+    option_list = BaseCommand.option_list + (
+        make_option('--noreload', action='store_false', dest='use_reloader', default=True,
+            help='Tells the server to NOT use the auto-reloader.'),
+    )
+    help = "Starts a lightweight websocket server for development."
+    args = '[optional port number, or ipaddr:port]'
 
     def handle(self, addrport="", *args, **options):
 
@@ -46,7 +57,10 @@ class Command(BaseCommand):
         # allowing the port to be set as the client-side default there.
         environ["DJANGO_SOCKETIO_PORT"] = str(self.port)
 
-        start_new_thread(reload_watcher, ())
+        autoreload = options.get('use_reloader', True)
+        if autoreload:
+            start_new_thread(reload_watcher, ())
+
         try:
             bind = (self.addr, int(self.port))
             print
@@ -56,10 +70,10 @@ class Command(BaseCommand):
             server = SocketIOServer(bind, handler, resource="socket.io")
             server.serve_forever()
         except KeyboardInterrupt:
-            if RELOAD:
+            if NEEDS_RELOAD and autoreload:
                 server.stop()
                 print
-                print "Reloading..."
+                print "Reloading SocketIOServer..."
                 restart_with_reloader()
             else:
                 raise
