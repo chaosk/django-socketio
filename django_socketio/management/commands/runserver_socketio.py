@@ -48,9 +48,9 @@ class Command(BaseCommand):
 
     def inner_run(self, *args, **options):
         bind = (self.addr, int(self.port))
-        print
-        print "SocketIOServer running on %s:%s" % bind
-        print
+        print()
+        print("SocketIOServer running on %s:%s" % bind)
+        print()
         handler = self.get_handler(*args, **options)
         server = SocketIOServer(bind, handler, resource="socket.io")
         server.serve_forever()
