@@ -1,4 +1,4 @@
-from django.utils.importlib import import_module
+from django.utils.module_loading import autodiscover_modules
 from socketio.mixins import BroadcastMixin
 from socketio.namespace import BaseNamespace
 
@@ -22,23 +22,7 @@ def autodiscover_socketios():
         return
     LOADING_SOCKETIO = True
 
-    import imp
-    from django.conf import settings
-
-    for app in settings.INSTALLED_APPS:
-
-        try:
-            app_path = import_module(app).__path__
-        except AttributeError:
-            continue
-
-        try:
-            imp.find_module('events', app_path)
-        except ImportError:
-            continue
-
-        import_module("%s.events" % app)
-
+    autodiscover_modules('events')
     LOADING_SOCKETIO = False
 
 
